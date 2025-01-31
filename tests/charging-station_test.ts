@@ -8,15 +8,20 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-    name: "Can register new charging station",
+    name: "Can register new charging station with peak hours",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const station = accounts.get('wallet_1')!;
         
+        let peakHours = Array(24).fill(false);
+        peakHours[9] = true; // 9am is peak
+        peakHours[17] = true; // 5pm is peak
+        
         let block = chain.mineBlock([
             Tx.contractCall('charging-station', 'register-station', [
                 types.principal(station.address),
-                types.ascii("123 Main St")
+                types.ascii("123 Main St"),
+                types.list(peakHours.map(x => types.bool(x)))
             ], deployer.address)
         ]);
         
@@ -25,17 +30,20 @@ Clarinet.test({
 });
 
 Clarinet.test({
-    name: "Can start and end charging session",
+    name: "Can start charging and earn rewards",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const station = accounts.get('wallet_1')!;
         const user = accounts.get('wallet_2')!;
         
+        let peakHours = Array(24).fill(false);
+        
         // First register station
         let block = chain.mineBlock([
             Tx.contractCall('charging-station', 'register-station', [
                 types.principal(station.address),
-                types.ascii("123 Main St")
+                types.ascii("123 Main St"),
+                types.list(peakHours.map(x => types.bool(x)))
             ], deployer.address),
             
             // Start charging
@@ -54,6 +62,7 @@ Clarinet.test({
             ], user.address)
         ]);
         
-        block2.receipts[0].result.expectOk();
+        const result = block2.receipts[0].result.expectOk().expectTuple();
+        assertEquals(result['rewards-earned'].toString(), '5');
     }
 });
