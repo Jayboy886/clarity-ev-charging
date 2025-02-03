@@ -92,7 +92,7 @@
                 (stx-transfer? payment caller (var-get owner)))
             err-not-available)))
 
-;; End charging session with rewards
+;; End charging session with rewards and refund unused payment
 (define-public (end-charging (station principal))
     (let
         ((station-data (unwrap! (map-get? charging-stations station) err-not-available))
@@ -100,11 +100,14 @@
          (duration (- block-height (get start-time session)))
          (rewards (* duration reward-rate))
          (current-rewards (default-to { points: u0, lifetime-charges: u0 } 
-                          (map-get? user-rewards tx-sender)))
+                         (map-get? user-rewards tx-sender)))
          (peak-rate (if (is-peak-hour) 
-                      (/ (* (var-get peak-multiplier) base-charging-rate) u10)
-                      base-charging-rate))
-         (total-cost (* duration peak-rate)))
+                     (/ (* (var-get peak-multiplier) base-charging-rate) u10)
+                     base-charging-rate))
+         (total-cost (* duration peak-rate))
+         (refund-amount (if (> (get paid-amount session) total-cost)
+                         (- (get paid-amount session) total-cost)
+                         u0)))
         (if (and
                 (is-eq station (get station session))
                 (is-eq (some tx-sender) (get current-user station-data)))
@@ -119,7 +122,10 @@
                     lifetime-charges: (+ (get lifetime-charges current-rewards) u1)
                 })
                 (map-delete charging-sessions tx-sender)
-                (ok {total-cost: total-cost, rewards-earned: rewards}))
+                (if (> refund-amount u0)
+                    (unwrap! (stx-transfer? refund-amount (var-get owner) tx-sender) err-insufficient-payment)
+                    (ok true))
+                (ok {total-cost: total-cost, rewards-earned: rewards, refund: refund-amount}))
             err-not-available)))
 
 ;; Read only functions
@@ -132,14 +138,14 @@
 (define-read-only (get-user-rewards (user principal))
     (map-get? user-rewards user))
     
-(define-read-only (get-base-rate)
+(define-read-only (get-base-rate))
     base-charging-rate)
     
-(define-read-only (get-peak-multiplier)
+(define-read-only (get-peak-multiplier))
     (var-get peak-multiplier))
     
 ;; Helper function to check if current block time is peak hour
-(define-private (is-peak-hour)
+(define-private (is-peak-hour))
     (let ((current-hour (mod block-height u24)))
         (unwrap-panic (element-at (get peak-hours 
             (unwrap-panic (map-get? charging-stations tx-sender))) current-hour))))

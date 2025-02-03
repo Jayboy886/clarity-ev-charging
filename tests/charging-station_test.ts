@@ -30,7 +30,7 @@ Clarinet.test({
 });
 
 Clarinet.test({
-    name: "Can start charging and earn rewards",
+    name: "Can start charging and earn rewards with refund of unused payment",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const station = accounts.get('wallet_1')!;
@@ -46,7 +46,7 @@ Clarinet.test({
                 types.list(peakHours.map(x => types.bool(x)))
             ], deployer.address),
             
-            // Start charging
+            // Start charging with more payment than needed
             Tx.contractCall('charging-station', 'start-charging', [
                 types.principal(station.address),
                 types.uint(100)
@@ -64,5 +64,6 @@ Clarinet.test({
         
         const result = block2.receipts[0].result.expectOk().expectTuple();
         assertEquals(result['rewards-earned'].toString(), '5');
+        assertEquals(result['refund'].toString(), '90');  // 100 - (1 minute * 10 rate)
     }
 });

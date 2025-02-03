@@ -6,7 +6,7 @@ A blockchain-based solution for managing shared electric vehicle charging statio
 - Dynamic pricing based on peak/off-peak hours
 - Rewards program for frequent users
 - Starting and ending charging sessions
-- Payment handling for charging services
+- Payment handling for charging services with automatic refunds
 - Real-time station availability tracking
 - Usage history and session management
 
@@ -21,6 +21,7 @@ A blockchain-based solution for managing shared electric vehicle charging statio
 - Base rate for charging per minute
 - Peak hour multiplier for dynamic pricing
 - STX token payment handling
+- Automatic refund of unused prepaid amounts
 
 ### Rewards Program
 - Earn reward points for each minute of charging
@@ -30,7 +31,7 @@ A blockchain-based solution for managing shared electric vehicle charging statio
 
 ### Session Management
 - Start charging sessions with prepayment
-- End sessions with final cost calculation and reward distribution
+- End sessions with final cost calculation, reward distribution, and refund processing
 - Query active sessions and history
 
 Built with Clarity for the Stacks blockchain.
