@@ -4,8 +4,14 @@
 (define-constant err-insufficient-payment (err u102))
 (define-constant err-no-active-session (err u103))
 (define-constant err-invalid-rate (err u104))
+(define-constant err-session-limit-exceeded (err u105))
+(define-constant err-station-maintenance (err u106))
+
 (define-constant base-charging-rate u10) ;; Base cost per minute in microSTX
 (define-constant reward-rate u5) ;; Reward points earned per minute
+(define-constant max-session-duration u480) ;; Maximum session duration (8 hours)
+(define-constant min-rate u5) ;; Minimum charging rate
+(define-constant max-rate u50) ;; Maximum charging rate
 
 ;; Data Variables
 (define-data-var owner principal tx-sender)
@@ -19,7 +25,8 @@
         rate-per-minute: uint,
         available: bool,
         current-user: (optional principal),
-        peak-hours: (list 24 bool)
+        peak-hours: (list 24 bool),
+        maintenance-mode: bool
     }
 )
 
@@ -52,18 +59,20 @@
                     rate-per-minute: base-charging-rate,
                     available: true,
                     current-user: none,
-                    peak-hours: peak-hour-list
+                    peak-hours: peak-hour-list,
+                    maintenance-mode: false
                 })
                 (ok true))
             err-not-owner)))
 
-;; Update station rate
+;; Update station rate with bounds checking
 (define-public (update-station-rate (station principal) (new-rate uint))
     (let
         ((caller tx-sender))
         (if (and
                 (is-eq caller (var-get owner))
-                (> new-rate u0))
+                (>= new-rate min-rate)
+                (<= new-rate max-rate))
             (begin
                 (map-set charging-stations station
                     (merge (unwrap! (map-get? charging-stations station) err-not-available)
@@ -71,12 +80,27 @@
                 (ok true))
             err-invalid-rate)))
 
-;; Start charging session
+;; Toggle station maintenance mode
+(define-public (toggle-maintenance-mode (station principal))
+    (let
+        ((caller tx-sender)
+         (station-data (unwrap! (map-get? charging-stations station) err-not-available)))
+        (if (is-eq caller (var-get owner))
+            (begin
+                (map-set charging-stations station
+                    (merge station-data
+                        { maintenance-mode: (not (get maintenance-mode station-data)) }))
+                (ok true))
+            err-not-owner)))
+
+;; Start charging session with duration check
 (define-public (start-charging (station principal) (payment uint))
     (let
         ((station-data (unwrap! (map-get? charging-stations station) err-not-available))
          (caller tx-sender))
-        (if (get available station-data)
+        (if (and 
+                (get available station-data)
+                (not (get maintenance-mode station-data)))
             (begin
                 (map-set charging-stations station
                     (merge station-data {
@@ -90,21 +114,25 @@
                     rewards-earned: u0
                 })
                 (stx-transfer? payment caller (var-get owner)))
-            err-not-available)))
+            (if (get maintenance-mode station-data)
+                err-station-maintenance
+                err-not-available))))
 
-;; End charging session with rewards and refund unused payment
+;; End charging session with duration limit check
 (define-public (end-charging (station principal))
     (let
         ((station-data (unwrap! (map-get? charging-stations station) err-not-available))
          (session (unwrap! (map-get? charging-sessions tx-sender) err-no-active-session))
          (duration (- block-height (get start-time session)))
-         (rewards (* duration reward-rate))
+         (rewards (if (<= duration max-session-duration)
+                    (* duration reward-rate)
+                    (* max-session-duration reward-rate)))
          (current-rewards (default-to { points: u0, lifetime-charges: u0 } 
                          (map-get? user-rewards tx-sender)))
          (peak-rate (if (is-peak-hour) 
                      (/ (* (var-get peak-multiplier) base-charging-rate) u10)
                      base-charging-rate))
-         (total-cost (* duration peak-rate))
+         (total-cost (* (min duration max-session-duration) peak-rate))
          (refund-amount (if (> (get paid-amount session) total-cost)
                          (- (get paid-amount session) total-cost)
                          u0)))
@@ -138,14 +166,14 @@
 (define-read-only (get-user-rewards (user principal))
     (map-get? user-rewards user))
     
-(define-read-only (get-base-rate))
+(define-read-only (get-base-rate)
     base-charging-rate)
     
-(define-read-only (get-peak-multiplier))
+(define-read-only (get-peak-multiplier)
     (var-get peak-multiplier))
     
 ;; Helper function to check if current block time is peak hour
-(define-private (is-peak-hour))
+(define-private (is-peak-hour)
     (let ((current-hour (mod block-height u24)))
         (unwrap-panic (element-at (get peak-hours 
             (unwrap-panic (map-get? charging-stations tx-sender))) current-hour))))
